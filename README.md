@@ -53,3 +53,25 @@ runs the smoke test through the add-on's own client and bin/.
 ## Build on Windows
 
 `build_windows.bat` does everything on a computer with Visual Studio (C++): BUILD_WINDOWS.md.
+
+## Code signing policy
+
+The Windows engine (`odent_engine.exe`) is signed. Free code signing is provided by
+[SignPath.io](https://about.signpath.io), certificate by
+[SignPath Foundation](https://signpath.org).
+
+- Only files built by this repository's GitHub Actions workflow (`.github/workflows/build.yml`)
+  from its own source, for a version tag, are signed, and every signing request is approved
+  by hand.
+- **Committers and reviewers:** the members of the
+  [OdentStudio](https://github.com/OdentStudio) organisation with write access.
+  Changes from anyone else are reviewed by one of them before they are merged.
+- **Approvers:** Dr. Essaid Issam Dakir.
+
+Third-party files shipped beside the engine keep their makers' signatures
+(`onnxruntime.dll`: Microsoft).
+
+## Privacy
+
+The engine collects no data and makes **no network connection**. It reads and writes only the
+files and memory the ODent5 add-on gives it, on your computer.

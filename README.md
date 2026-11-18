@@ -35,6 +35,13 @@ ITK, VTK and ONNX Runtime, once (about 22 min on 8 cores):
 deps/build_deps.sh ~/MyApps/odent_engine_deps
 ```
 
+ONNX Runtime 1.23.2's original download (github.com/microsoft/onnxruntime) is gone since
+2026-11-18. The same files, with the checksums the scripts pin, are this repository's release
+`deps`: put the one for your platform in `<deps>/downloads/` first (the scripts then use it):
+`gh release download deps -R OdentStudio/OdentEngine -p 'onnxruntime-linux-x64-*'
+-D ~/MyApps/odent_engine_deps/downloads` (Windows: `-p 'onnxruntime-win-x64-*' -D
+C:\odent_deps\downloads`). The workflow does the same.
+
 Then the engine, installed into `bin/linux-x64/`, and the smoke test (a Python 3.13 with numpy:
 Blender 5.2's Python works):
 

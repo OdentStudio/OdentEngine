@@ -87,6 +87,15 @@ jobs:
         with:
           path: ~/odent_deps/install
           key: deps-linux-${{ env.DEPS_CACHE }}-${{ hashFiles('deps/build_deps.sh') }}
+      # ONNX Runtime 1.23.2: its original download (microsoft/onnxruntime) is gone; the same
+      # files, same checksums, are this repository's release "deps"
+      - name: ONNX Runtime package
+        if: steps.deps.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p ~/odent_deps/downloads
+          gh release download deps -p 'onnxruntime-linux-x64-*.tgz' -D ~/odent_deps/downloads --clobber
       - name: Build ITK and VTK
         if: steps.deps.outputs.cache-hit != 'true'
         run: deps/build_deps.sh ~/odent_deps
@@ -138,6 +147,15 @@ jobs:
         with:
           path: C:\odent_deps\install
           key: deps-windows-${{ env.DEPS_CACHE }}-${{ hashFiles('deps/build_deps.sh', 'build_windows.ps1') }}
+
+      # ONNX Runtime 1.23.2 (see the Linux job), unpacked by the script when install\ has none
+      - name: ONNX Runtime package
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p C:/odent_deps/downloads
+          gh release download deps -p 'onnxruntime-win-x64-*.zip' -D C:/odent_deps/downloads --clobber
 
       # ITK, VTK (skipped when restored: the script's stamp file is in install\), the engine
       # into bin\win-x64, the ping and the smoke test

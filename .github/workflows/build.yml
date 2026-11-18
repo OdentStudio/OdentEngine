@@ -1,0 +1,227 @@
+# The ODent engine for Linux and Windows: built, smoke tested and, on a version tag, released.
+#
+#   VERSION = 1.2.0, committed  ->  git tag v1.2.0 && git push origin v1.2.0
+#
+# A tag v<VERSION> (it must equal the VERSION file) makes the release v<VERSION> with
+# engine-linux-x64.zip and engine-win-x64.zip (bin/<platform>/: the engine, ONNX Runtime and
+# engine_source.txt = "v<VERSION>") and a JSON text {engine_version, tag, commit, sha256:
+# {platform}}: the ODent5 add-on pins it (its engine.json) and its release workflow puts
+# that engine in the install zips. Never edit the text by hand.
+# A push to main, a pull request or "Run workflow" builds and tests only (no release, no
+# artifacts: they count against the organisation's storage).
+#
+# ITK and VTK are built once per platform (Linux ~25 min, Windows 30-60 min) and cached; the
+# key follows deps/build_deps.sh and build_windows.ps1 (the pinned versions). A cache unused
+# for 7 days is dropped by GitHub. Change DEPS_CACHE to force a rebuild.
+#
+# Windows code signing: SignPath Foundation (open-source projects: this repository must be
+# public). Off until the repository variable SIGNPATH_ORGANIZATION_ID is set (with
+# SIGNPATH_PROJECT_SLUG, SIGNPATH_POLICY_SLUG, SIGNPATH_ARTIFACT_CONFIGURATION_SLUG and the
+# secret SIGNPATH_API_TOKEN); only release builds (tags) are signed.
+
+name: Engine
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: engine-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+env:
+  DEPS_CACHE: v1
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      release: ${{ steps.v.outputs.release }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Version, and the release for a tag
+        id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(tr -d '[:space:]' < VERSION)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+              echo "::error::tag $GITHUB_REF_NAME is not v$version (the VERSION file)"; exit 1
+            fi
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            # made at once, as a draft, so both platforms can upload into it
+            printf '{"engine_version": "%s", "tag": "%s", "commit": "%s", "building": true, "sha256": {}}\n' \
+              "$version" "$GITHUB_REF_NAME" "$GITHUB_SHA" > notes.json
+            gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || \
+              gh release create "$GITHUB_REF_NAME" --draft --verify-tag \
+                --title "ODent engine $version" --notes-file notes.json
+          else
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  linux:
+    needs: prepare
+    runs-on: ubuntu-24.04   # glibc 2.39: the engine runs on glibc 2.38+
+    permissions:
+      contents: write
+    outputs:
+      sha256: ${{ steps.pack.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"   # the smoke test uses SharedMemory(track=)
+      - run: pip install numpy
+
+      - name: Restore ITK and VTK
+        id: deps
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/odent_deps/install
+          key: deps-linux-${{ env.DEPS_CACHE }}-${{ hashFiles('deps/build_deps.sh') }}
+      - name: Build ITK and VTK
+        if: steps.deps.outputs.cache-hit != 'true'
+        run: deps/build_deps.sh ~/odent_deps
+      - name: Save ITK and VTK
+        if: steps.deps.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/odent_deps/install
+          key: ${{ steps.deps.outputs.cache-primary-key }}
+
+      - name: Build the engine
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=$HOME/odent_deps/install
+          cmake --build build -j "$(nproc)"
+          cmake --install build --strip
+          printf '{"id":1,"cmd":"ping"}\n' | bin/linux-x64/odent_engine
+
+      - name: Smoke test
+        run: python tests/smoke_test.py
+
+      - name: Pack and upload
+        id: pack
+        if: needs.prepare.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python tools/pack.py linux-x64 "$GITHUB_REF_NAME"
+          gh release upload "$GITHUB_REF_NAME" engine-linux-x64.zip --clobber
+
+  windows:
+    needs: prepare
+    runs-on: windows-latest   # Visual Studio 2022 with C++
+    permissions:
+      contents: write
+      actions: read
+    outputs:
+      sha256: ${{ steps.pack.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - run: pip install numpy
+
+      # C:\odent_deps: short, ITK's build paths are long (260 characters)
+      - name: Restore ITK and VTK
+        id: deps
+        uses: actions/cache/restore@v4
+        with:
+          path: C:\odent_deps\install
+          key: deps-windows-${{ env.DEPS_CACHE }}-${{ hashFiles('deps/build_deps.sh', 'build_windows.ps1') }}
+
+      # ITK, VTK (skipped when restored: the script's stamp file is in install\), the engine
+      # into bin\win-x64, the ping and the smoke test
+      - name: Build the engine
+        shell: pwsh
+        run: .\build_windows.ps1 -Deps C:\odent_deps -Python python
+
+      # also when the engine failed after ITK and VTK were built: not 30-60 min again
+      - name: Check ITK and VTK were built
+        if: always() && steps.deps.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $ok = Test-Path "C:\odent_deps\install\odent_deps_itk*_vtk*.txt"
+          "built=$ok" >> $env:GITHUB_OUTPUT
+        id: built
+      - if: always() && steps.built.outputs.built == 'True'
+        uses: actions/cache/save@v4
+        with:
+          path: C:\odent_deps\install
+          key: ${{ steps.deps.outputs.cache-primary-key }}
+
+      - name: Show the engine's version information
+        shell: pwsh
+        run: |
+          $v = (Get-Item bin\win-x64\odent_engine.exe).VersionInfo
+          "{0} {1} ({2})" -f $v.ProductName, $v.ProductVersion, $v.FileVersion
+
+      # Code signing by SignPath Foundation: release builds only, once it is set up
+      - name: Upload the unsigned engine for signing
+        id: unsigned
+        if: needs.prepare.outputs.release == 'true' && vars.SIGNPATH_ORGANIZATION_ID != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: odent_engine-unsigned
+          path: bin/win-x64/odent_engine.exe
+          if-no-files-found: error
+      - name: Sign the engine (SignPath)
+        if: needs.prepare.outputs.release == 'true' && vars.SIGNPATH_ORGANIZATION_ID != ''
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG }}
+          github-artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600   # a release waits for its approver
+          output-artifact-directory: bin/win-x64          # the signed exe replaces the unsigned one
+      - name: Check the signed engine
+        if: needs.prepare.outputs.release == 'true' && vars.SIGNPATH_ORGANIZATION_ID != ''
+        shell: pwsh
+        run: |
+          $exe = "bin\win-x64\odent_engine.exe"
+          $sig = Get-AuthenticodeSignature $exe
+          "signature: {0}, by {1}" -f $sig.Status, $sig.SignerCertificate.Subject
+          if ($sig.Status -ne "Valid") { throw "the engine is not validly signed" }
+          '{"id":1,"cmd":"ping"}' | & $exe
+
+      - name: Pack and upload
+        id: pack
+        if: needs.prepare.outputs.release == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python tools/pack.py win-x64 "$GITHUB_REF_NAME"
+          gh release upload "$GITHUB_REF_NAME" engine-win-x64.zip --clobber
+
+  release:
+    needs: [prepare, linux, windows]
+    if: needs.prepare.outputs.release == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: The checksums into the text, then published
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LINUX: ${{ needs.linux.outputs.sha256 }}
+          WINDOWS: ${{ needs.windows.outputs.sha256 }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          printf '{\n "engine_version": "%s",\n "tag": "%s",\n "commit": "%s",\n "sha256": {\n  "linux-x64": "%s",\n  "win-x64": "%s"\n }\n}\n' \
+            "$VERSION" "$GITHUB_REF_NAME" "$GITHUB_SHA" "$LINUX" "$WINDOWS" > notes.json
+          cat notes.json
+          gh release edit "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --notes-file notes.json --draft=false --latest

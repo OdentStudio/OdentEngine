@@ -1,0 +1,33 @@
+// Windows version information of odent_engine.exe (Properties > Details), filled by
+// CMake from VERSION. Code signing (SignPath) checks that
+// the product name and version are the same in every build of a release.
+#include <winver.h>
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION    @ODENT_V_MAJOR@,@ODENT_V_MINOR@,@ODENT_V_PATCH@,0
+ PRODUCTVERSION @ODENT_V_MAJOR@,@ODENT_V_MINOR@,@ODENT_V_PATCH@,0
+ FILEFLAGSMASK  VS_FFI_FILEFLAGSMASK
+ FILEFLAGS      0
+ FILEOS         VOS_NT_WINDOWS32
+ FILETYPE       VFT_APP
+ FILESUBTYPE    0
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904B0"
+    BEGIN
+      VALUE "CompanyName",      "OdentStudio"
+      VALUE "FileDescription",  "ODent engine: CT, DICOM and mesh processing for the ODent5 Blender add-on"
+      VALUE "FileVersion",      "@ODENT_ENGINE_VERSION@"
+      VALUE "InternalName",     "odent_engine"
+      VALUE "LegalCopyright",   "GPL-3.0-or-later, the ODent5 authors"
+      VALUE "OriginalFilename", "odent_engine.exe"
+      VALUE "ProductName",      "ODent engine"
+      VALUE "ProductVersion",   "@ODENT_ENGINE_VERSION@"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x0409, 1200
+  END
+END

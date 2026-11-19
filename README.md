@@ -23,9 +23,20 @@ Each version is released once, built and tested by GitHub Actions
 4. In the ODent5 add-on, `engine.json` names the release to use: its release zips take that
    engine.
 
-A change of the protocol (a new command, other arguments) is a new engine version, and the
-add-on that calls it raises its `engine.json` in the same pull request. `ODENT_ENGINE_API`
-(main.cpp; `API` in the client) changes only when an older add-on cannot talk to it at all.
+Then a pull request opens in the add-on's repository with `engine.json` pinned to it (the
+workflow's `pin` job): try it, add the add-on's side of the change to that branch when there is
+one, merge. Merging is what ships the engine to the team and the next ODent5 release.
+
+### Versions: MAJOR.MINOR.PATCH
+
+- **PATCH** (1.0.0 -> 1.0.1): a fix or a speed-up; the same commands and arguments. Any add-on
+  that works with 1.0.0 works with it.
+- **MINOR** (1.0.x -> 1.1.0): something new: a command, an argument, a field in a reply. Older
+  add-ons still work; the add-on that uses the new part needs this version (its `engine.json`).
+- **MAJOR** (1.x -> 2.0.0): the protocol breaks (a command removed or changed): raise
+  `ODENT_ENGINE_API` too (main.cpp; `API` in the client), and older add-ons refuse the engine.
+
+One version, one tag, one release: a released tag is never moved; a fix is the next PATCH.
 
 ## Build on Linux
 

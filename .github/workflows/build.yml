@@ -243,3 +243,45 @@ jobs:
             "$VERSION" "$GITHUB_REF_NAME" "$GITHUB_SHA" "$LINUX" "$WINDOWS" > notes.json
           cat notes.json
           gh release edit "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --notes-file notes.json --draft=false --latest
+
+  # The add-on starts using this engine by a pull request there: engine.json pinned to this
+  # release (the add-on's tools/get_engine.py --pin, its SHA-256 from this release's text).
+  # Set up once: the repository variable ADDON_REPO (owner/name of the add-on's repository) and
+  # the secret ADDON_PR_TOKEN (a fine-grained token: that repository only, Contents and Pull
+  # requests read and write). Without them the job only says to pin it by hand.
+  pin:
+    needs: [prepare, release]
+    if: needs.prepare.outputs.release == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: A pull request in the add-on that uses this engine
+        env:
+          TOKEN: ${{ secrets.ADDON_PR_TOKEN }}
+          ADDON_REPO: ${{ vars.ADDON_REPO }}
+          TAG: ${{ github.ref_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RELEASE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ github.ref_name }}
+        run: |
+          if [ -z "$TOKEN" ] || [ -z "$ADDON_REPO" ]; then
+            echo "::notice::ADDON_REPO / ADDON_PR_TOKEN not set: in the add-on, python tools/get_engine.py --pin $TAG"
+            exit 0
+          fi
+          git clone -q "https://x-access-token:${TOKEN}@github.com/${ADDON_REPO}.git" addon-repo
+          cd addon-repo
+          branch="engine-$TAG"
+          git switch -c "$branch"
+          GH_TOKEN="" GITHUB_TOKEN="" python3 tools/get_engine.py --pin "$TAG"   # this repository is public
+          if git diff --quiet -- engine.json; then
+            echo "::notice::the add-on already uses $TAG"; exit 0
+          fi
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -q -m "engine.json: the ODent engine $TAG" -m "Released by $RELEASE_URL (built and smoke tested: $RUN_URL)." engine.json
+          git push -q origin "$branch"
+          printf '%s\n' \
+            "The ODent engine **$TAG**: [release]($RELEASE_URL), built and smoke tested on Linux and Windows ([run]($RUN_URL))." \
+            "" \
+            "Merging makes the add-on use it: the release zips, and teammates with Update." \
+            "Before merging: try it here with \`python tools/get_engine.py\` on this branch; when the add-on" \
+            "needs a change for it (a new command), add that change to this branch." > body.md
+          GH_TOKEN="$TOKEN" gh pr create -R "$ADDON_REPO" --base main --head "$branch" \
+            --title "Engine $TAG" --body-file body.md
